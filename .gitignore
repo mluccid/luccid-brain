@@ -1,2 +1,7 @@
 .env
 .venv/
+text/
+pdf2text.py
+indexing_gemini.py
+generate_texts.py
+output/

@@ -1,9 +1,8 @@
 import os
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain.prompts import PromptTemplate
 from langchain.chains import RetrievalQA
 from langchain_pinecone import PineconeVectorStore
-from langchain.embeddings import HuggingFaceEmbeddings
 from pinecone import Pinecone
 from dotenv import load_dotenv
 from sklearn.metrics.pairwise import cosine_similarity
@@ -38,7 +37,8 @@ def display_login_form():
             else:
                 st.error("Incorrect username or password.")
 
-embeddings_model = HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-mpnet-base-v2")
+model = 'models/embedding-001'
+embeddings = GoogleGenerativeAIEmbeddings(model=model)
 pc = Pinecone(api_key=PINECONE_API_KEY)
 index_name = INDEX_NAME
 
@@ -49,10 +49,10 @@ index = pc.Index(index_name)
 
 vector_store = PineconeVectorStore(pinecone_api_key=PINECONE_API_KEY,
                                    index_name=INDEX_NAME,
-                                   embedding=embeddings_model)
+                                   embedding=embeddings)
 
 
-llm = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0.7)
+llm = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0.01)
 
 prompt_template = """
 Koristi trenutni kontekst da odgovoriš na pitanje.
@@ -113,8 +113,8 @@ def display_main_app():
 
             qa_chain = RetrievalQA.from_chain_type(
                 llm=llm,
-                chain_type="stuff",
-                retriever=vector_store.as_retriever(),
+                chain_type="map_rerank",
+                retriever=vector_store.as_retriever(search_kwargs={"k": 5}),
                 return_source_documents=True,
                 chain_type_kwargs={"prompt": PROMPT}
             )
@@ -132,13 +132,13 @@ def display_main_app():
                 return
 
             if 'result' in locals():
-                result_embedding = embeddings_model.embed_query(result['result'])
+                result_embedding = embeddings.embed_query(result['result'])
 
                 best_doc = None
                 max_similarity = -1
 
                 for doc in result['source_documents']:
-                    doc_embedding = embeddings_model.embed_query(doc.page_content)
+                    doc_embedding = embeddings.embed_query(doc.page_content)
                     similarity = cosine_similarity([result_embedding], [doc_embedding])[0][0]
                     if similarity > max_similarity:
                         max_similarity = similarity
