@@ -5,3 +5,5 @@ pdf2text.py
 indexing_gemini.py
 generate_texts.py
 output/
+test.py
+indexing_cohere.py

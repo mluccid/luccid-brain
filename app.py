@@ -113,7 +113,7 @@ def display_main_app():
 
             qa_chain = RetrievalQA.from_chain_type(
                 llm=llm,
-                chain_type="map_rerank",
+                chain_type="stuff",
                 retriever=vector_store.as_retriever(search_kwargs={"k": 5}),
                 return_source_documents=True,
                 chain_type_kwargs={"prompt": PROMPT}
