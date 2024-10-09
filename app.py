@@ -1,10 +1,12 @@
 import os
+from typing import List
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain.prompts import PromptTemplate
 from langchain.chains import RetrievalQA
 from langchain_pinecone import PineconeVectorStore
 from pinecone import Pinecone
 from dotenv import load_dotenv
+import requests
 from sklearn.metrics.pairwise import cosine_similarity
 import streamlit as st
 from langchain_openai import ChatOpenAI
@@ -20,6 +22,30 @@ OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
+
+
+def run_jina_reranker(
+    documents: List[str],
+    query: str,
+    url:str = 'https://api.jina.ai/v1/rerank',
+    model:str = "jina-reranker-v2-base-multilingual",
+    top_n: int = 5
+) -> dict:
+    jina_api_key = os.getenv("JINA_API_KEY")
+    if not jina_api_key:
+        raise ValueError("JINA_API_KEY is not set")
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {jina_api_key}'
+    }
+    data = {
+        "model": model,
+        "query": query,
+        "top_n": top_n,
+        "documents": documents
+    }
+    response = requests.post(url, json=data, headers=headers)
+    return response.json()
     
 def check_credentials(username, password):
     correct_password = os.getenv('USER_PASSWORD')
@@ -141,6 +167,7 @@ def display_main_app():
                         template=prompt_gpt, input_variables=["context", "question"]
                     )
                     llm2 = ChatOpenAI(openai_api_key=OPENAI_API_KEY, model_name="gpt-3.5-turbo")
+                    
                     qa_chain = RetrievalQA.from_chain_type(
                         llm=llm2,
                         chain_type="stuff",
@@ -148,7 +175,30 @@ def display_main_app():
                         return_source_documents=True,
                         chain_type_kwargs={"prompt": PROMPTGPT}
                     )
+                    
                     result = qa_chain({"query": query})
+
+                if (result['result'].strip()=='NE ZNAM'):
+                    top_30_docs, reranker_docs = [], []
+                    retriever = vector_store.as_retriever(search_kwargs={"k": 30})
+                    retrieved_docs = retriever.get_relevant_documents(query) 
+                    for doc in retrieved_docs:
+                        top_30_docs.append(doc.page_content)
+
+                    reranker_results = run_jina_reranker(top_30_docs, query)
+                    for reranker_result in reranker_results['results']:
+                        reranker_docs.append(reranker_result['document']['text'])
+
+                    qa_chain = RetrievalQA.from_chain_type(
+                        llm=llm,
+                        chain_type="stuff",
+                        retriever=None,
+                        return_source_documents=True,
+                        chain_type_kwargs={"prompt": PROMPT}
+                    )
+
+                    result = qa_chain({"query": query, "source_documents": reranker_docs})
+
                 st.write(result['result'])
                 st.subheader("Izvor odgovora:")
                 st.write(result['source_documents'])
