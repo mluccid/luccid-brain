@@ -7,6 +7,8 @@ from pinecone import Pinecone
 from dotenv import load_dotenv
 from sklearn.metrics.pairwise import cosine_similarity
 import streamlit as st
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
 
 load_dotenv()
 
@@ -14,6 +16,7 @@ PINECONE_API_KEY = os.getenv('PINECONE_API_KEY')
 PINECONE_ENVIRONMENT = os.getenv('PINECONE_ENVIRONMENT')
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
 INDEX_NAME = os.getenv('INDEX_NAME')
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
@@ -64,6 +67,16 @@ Kontekst:
 
 Pitanje: {question}
 Answer:"""
+
+prompt_gpt = """
+Bazirano na poslatim dokumentima, izvuci odgovor na pitanje: {question}
+Ukoliko nijesi siguran, odgovori sa NE ZNAM
+Nemoj da izmišljaš odgovor i za odgovaranje koristi samo kontekst koji ti je proslijeđen.
+Svi odgovori moraju biti na srpskom jeziku.
+Potrudi se da pronađeš odgovor. Odgovori sa NE ZNAM samo ako se stvarno ništa ne pominje u proslijeđenim dokumentima.
+Dokumenti:
+{context}
+"""
 
 def fetch_all_chunks(article_id, title):
     metadata_filter = {
@@ -123,6 +136,19 @@ def display_main_app():
                 result = qa_chain({"query": query})
                 st.success("Upit je uspješno izvršen.")
                 st.subheader("Odgovor:")
+                if (result['result'].strip()=='NE ZNAM'):
+                    PROMPTGPT = PromptTemplate(
+                        template=prompt_gpt, input_variables=["context", "question"]
+                    )
+                    llm2 = ChatOpenAI(openai_api_key=OPENAI_API_KEY, model_name="gpt-3.5-turbo")
+                    qa_chain = RetrievalQA.from_chain_type(
+                        llm=llm2,
+                        chain_type="stuff",
+                        retriever=vector_store.as_retriever(search_kwargs={"k": 15}),
+                        return_source_documents=True,
+                        chain_type_kwargs={"prompt": PROMPTGPT}
+                    )
+                    result = qa_chain({"query": query})
                 st.write(result['result'])
                 st.subheader("Izvor odgovora:")
                 st.write(result['source_documents'])
