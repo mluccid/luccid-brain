@@ -11,6 +11,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 import streamlit as st
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
+from langchain.chains import LLMChain
 
 load_dotenv()
 
@@ -158,54 +159,55 @@ def display_main_app():
                 chain_type_kwargs={"prompt": PROMPT}
             )
 
-            try:
+            # try:
+            result = qa_chain({"query": query})
+            st.success("Upit je uspješno izvršen.")
+            st.subheader("Odgovor:")
+            if (result['result'].strip()=='NE ZNAM'):
+                PROMPTGPT = PromptTemplate(
+                    template=prompt_gpt, input_variables=["context", "question"]
+                )
+                llm2 = ChatOpenAI(openai_api_key=OPENAI_API_KEY, model_name="gpt-3.5-turbo")
+                
+                qa_chain = RetrievalQA.from_chain_type(
+                    llm=llm2,
+                    chain_type="stuff",
+                    retriever=vector_store.as_retriever(search_kwargs={"k": 15}),
+                    return_source_documents=True,
+                    chain_type_kwargs={"prompt": PROMPTGPT}
+                )
+                
                 result = qa_chain({"query": query})
-                st.success("Upit je uspješno izvršen.")
-                st.subheader("Odgovor:")
-                if (result['result'].strip()=='NE ZNAM'):
-                    PROMPTGPT = PromptTemplate(
-                        template=prompt_gpt, input_variables=["context", "question"]
-                    )
-                    llm2 = ChatOpenAI(openai_api_key=OPENAI_API_KEY, model_name="gpt-3.5-turbo")
-                    
-                    qa_chain = RetrievalQA.from_chain_type(
-                        llm=llm2,
-                        chain_type="stuff",
-                        retriever=vector_store.as_retriever(search_kwargs={"k": 15}),
-                        return_source_documents=True,
-                        chain_type_kwargs={"prompt": PROMPTGPT}
-                    )
-                    
-                    result = qa_chain({"query": query})
 
-                if (result['result'].strip()=='NE ZNAM'):
-                    top_30_docs, reranker_docs = [], []
-                    retriever = vector_store.as_retriever(search_kwargs={"k": 30})
-                    retrieved_docs = retriever.get_relevant_documents(query) 
-                    for doc in retrieved_docs:
-                        top_30_docs.append(doc.page_content)
+            if (result['result'].strip()=='NE ZNAM'):
+                top_30_docs, reranker_docs = [], []
+                retriever = vector_store.as_retriever(search_kwargs={"k": 30})
+                retrieved_docs = retriever.get_relevant_documents(query) 
+                for doc in retrieved_docs:
+                    top_30_docs.append(doc.page_content)
 
-                    reranker_results = run_jina_reranker(top_30_docs, query)
-                    for reranker_result in reranker_results['results']:
-                        reranker_docs.append(reranker_result['document']['text'])
+                reranker_results = run_jina_reranker(top_30_docs, query)
+                for reranker_result in reranker_results['results']:
+                    reranker_docs.append(reranker_result['document']['text'])
 
-                    qa_chain = RetrievalQA.from_chain_type(
-                        llm=llm,
-                        chain_type="stuff",
-                        retriever=None,
-                        return_source_documents=True,
-                        chain_type_kwargs={"prompt": PROMPT}
-                    )
+                context = "\n\n".join([doc for doc in reranker_docs])
 
-                    result = qa_chain({"query": query, "source_documents": reranker_docs})
+                # Create the prompt using the context and the user query
+                prompt = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
 
+                # Create an LLMChain to send the query and context to the LLM
+                qa_chain = LLMChain(llm=llm, prompt=prompt)
+
+                # Run the query through the LLM with the reranked context
+                result['result'] = qa_chain.run({"context": context, "question": query})
+                
                 st.write(result['result'])
                 st.subheader("Izvor odgovora:")
                 st.write(result['source_documents'])
-            except Exception as e:
-                st.error(f"Desila se greška: {str(e)}")
-                st.error(f"Detalji greške: {e.__class__.__name__}")
-                return
+            # except Exception as e:
+            #     st.error(f"Desila se greška: {str(e)}")
+            #     st.error(f"Detalji greške: {e.__class__.__name__}")
+            #     return
 
             if 'result' in locals():
                 result_embedding = embeddings.embed_query(result['result'])
